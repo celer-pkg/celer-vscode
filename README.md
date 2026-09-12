@@ -2,6 +2,8 @@
 
 Graphical interface for the [Celer](https://github.com/microsoft/celer) C/C++ package manager, right in your editor.
 
+<img src="resources/vscode_plugin.png" alt="Celer VS Code sidebar" width="320">
+
 ## Features
 
 - **Status Bar** — One-click access to init, install, update, search, clean, create, and more
