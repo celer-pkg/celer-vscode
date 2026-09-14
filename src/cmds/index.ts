@@ -13,6 +13,7 @@ export { registerAutoremoveCommand } from './autoremove';
 export { registerTreeCommand } from './tree';
 export { registerReverseCommand } from './reverse';
 export { registerDeployCommand } from './deploy';
+export { registerStripCommand } from './strip';
 export { registerCreateCommand } from './create';
 export { registerConfigureCommand } from './configure';
 export { registerVersionCommand } from './version';

@@ -2,7 +2,7 @@
   "name": "celer",
   "displayName": "Celer - C/C++ Package Manager",
   "description": "GUI plugin for Celer Package Manager",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "publisher": "celer",
   "icon": "resources/logo.png",
   "repository": {
@@ -25,7 +25,7 @@
         {
           "id": "celer-sidebar",
           "title": "Celer",
-          "icon": "resources/logo.png"
+          "icon": "resources/activitybar.png"
         }
       ]
     },
@@ -98,6 +98,11 @@
         "command": "celer.deploy",
         "title": "Celer: Deploy Project",
         "icon": "$(rocket)"
+      },
+      {
+        "command": "celer.strip",
+        "title": "Celer: Strip",
+        "icon": "$(file-binary)"
       },
       {
         "command": "celer.create",

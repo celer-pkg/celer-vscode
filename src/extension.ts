@@ -13,6 +13,7 @@ import {
     registerTreeCommand,
     registerReverseCommand,
     registerDeployCommand,
+    registerStripCommand,
     registerCreateCommand,
     registerConfigureCommand,
     registerVersionCommand,
@@ -97,6 +98,7 @@ export async function activate(context: vscode.ExtensionContext) {
     registerTreeCommand(context, celer);
     registerReverseCommand(context, celer);
     registerDeployCommand(context, celer);
+    registerStripCommand(context, celer);
     registerCreateCommand(context, celer);
     registerConfigureCommand(context, celer);
     registerVersionCommand(context, celer);

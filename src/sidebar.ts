@@ -367,6 +367,7 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
             <button class="cmd-btn" data-cmd="celer.tree"><span class="cmd-icon">\u{1F333}</span> Tree</button>
             <button class="cmd-btn" data-cmd="celer.reverse"><span class="cmd-icon">\u{1F517}</span> Reverse</button>
             <button class="cmd-btn" data-cmd="celer.deploy"><span class="cmd-icon">\u{1F680}</span> Deploy</button>
+            <button class="cmd-btn" data-cmd="celer.strip"><span class="cmd-icon">\u{2702}</span> Strip</button>
             <button class="cmd-btn" data-cmd="celer.version"><span class="cmd-icon">\u{2139}</span> Version</button>
         </div>
     </div>

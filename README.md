@@ -34,6 +34,7 @@ Activates automatically when a `celer.toml` or `Celer.toml` is present.
 | `Celer: Show Dependency Tree` | View a package's dependency graph |
 | `Celer: Show Reverse Dependencies` | See what depends on a package |
 | `Celer: Deploy Project` | Deploy built artifacts |
+| `Celer: Strip` | Strip installed binaries and libraries |
 | `Celer: Configure Global Settings` | Edit global Celer configuration |
 | `Celer: Show Version` | Display Celer version info |
 

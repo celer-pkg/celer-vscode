@@ -113,6 +113,7 @@ export class CelerTreeDataProvider implements vscode.TreeDataProvider<CelerTreeI
             new CommandItem('Tree', 'Show dependency tree', 'list-tree', 'celer.tree'),
             new CommandItem('Reverse', 'Query reverse dependencies', 'references', 'celer.reverse'),
             new CommandItem('Deploy', 'Deploy Project', 'rocket', 'celer.deploy'),
+            new CommandItem('Strip', 'Strip installed binaries and libraries', 'file-binary', 'celer.strip'),
             new CommandItem('Version', 'Show version info', 'info', 'celer.version'),
         ]);
 
