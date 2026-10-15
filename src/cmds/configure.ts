@@ -85,36 +85,61 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
             }
 
             case 'pkgcache': {
+                // pkgcache has two mutually exclusive storage backends:
+                //   fs    -> [pkgcache.fs] dir            (--pkgcache-fs-dir)
+                //   minio -> [pkgcache.minio] host/keys   (--pkgcache-minio-*)
+                // `writable` lives on [pkgcache] itself and applies to either backend.
                 const pk = toml.pkgcache || {};
-                const onOff = (v: any) => v === true ? 'ON' : 'OFF';
+                const pkFs = pk.fs || {};
+                const pkMinio = pk.minio || {};
+                const currentBackend = pk.minio
+                    ? `MinIO (${pkMinio.host || 'host not set'})`
+                    : pk.fs
+                        ? `File System (${pkFs.dir || 'dir not set'})`
+                        : 'not configured';
+
                 const cacheOption = await vscode.window.showQuickPick(
                     [
-                        { label: 'Cache Directory', value: 'pkgcache-dir', description: 'Set package cache directory' },
-                        { label: 'Cache Writable', value: 'pkgcache-writable', description: `Enable/disable package cache writes (${onOff(pk.writable)})` },
-                        { label: 'Cache Artifacts', value: 'pkgcache-cache-artifacts', description: `Cache built artifacts (${onOff(pk.cache_artifacts)})` },
-                        { label: 'Cache Downloads', value: 'pkgcache-cache-downloads', description: `Cache downloaded sources (${onOff(pk.cache_downloads)})` }
+                        { label: '$(folder) File System Backend', value: 'fs', description: 'Cache to a shared directory (mutually exclusive with MinIO)' },
+                        { label: '$(cloud) MinIO Backend', value: 'minio', description: 'Cache to a MinIO/S3 bucket (mutually exclusive with File System)' },
+                        { label: '$(lock) Cache Writable', value: 'pkgcache-writable', description: `Allow this node to write the cache (${pk.writable === undefined ? 'ON (default)' : onOff(pk.writable)})` }
                     ],
-                    { placeHolder: 'Select package cache setting' }
+                    { placeHolder: `Select package cache storage backend (current: ${currentBackend})` }
                 );
                 if (!cacheOption) { return; }
 
-                if (cacheOption.value === 'pkgcache-dir') {
-                    const value = await pickDir('Select Package Cache Directory');
-                    if (value) {
-                        await celer.runCommandInTerminal(['configure', `--pkgcache-dir=${value}`]);
+                if (cacheOption.value === 'fs') {
+                    const dir = await pickDir('Select Package Cache Directory');
+                    if (dir) {
+                        await celer.runCommandInTerminal(['configure', `--pkgcache-fs-dir="${dir}"`]);
                     }
+                } else if (cacheOption.value === 'minio') {
+                    const host = await vscode.window.showInputBox({
+                        prompt: 'Enter MinIO endpoint (use the S3 API port, e.g. :9000 not :9001)',
+                        placeHolder: 'http://minio.example.com:9000',
+                        value: pkMinio.host || ''
+                    });
+                    if (!host) { return; }
+                    const accessKey = await vscode.window.showInputBox({
+                        prompt: 'Enter MinIO access key',
+                        value: pkMinio.access_key || ''
+                    });
+                    if (!accessKey) { return; }
+                    const secretKey = await vscode.window.showInputBox({
+                        prompt: 'Enter MinIO secret key',
+                        password: true
+                    });
+                    if (!secretKey) { return; }
+                    await celer.runCommandInTerminal([
+                        'configure',
+                        `--pkgcache-minio-host=${host}`,
+                        `--pkgcache-minio-access-key=${accessKey}`,
+                        `--pkgcache-minio-secret-key=${secretKey}`
+                    ]);
                 } else {
-                    // pkgcache booleans are in [pkgcache] section (e.g. writable, cache_artifacts, cache_downloads)
-                    const keyMap: Record<string, string> = {
-                        'pkgcache-writable': 'writable',
-                        'pkgcache-cache-artifacts': 'cache_artifacts',
-                        'pkgcache-cache-downloads': 'cache_downloads',
-                    };
-                    const realKey = keyMap[cacheOption.value] || cacheOption.value;
-                    const currentVal = (toml.pkgcache || {})[realKey];
-                    const action = await pickBool(cacheOption.label, currentVal);
+                    const action = await pickBool('Cache Writable', pk.writable);
                     if (action) {
-                        await celer.runCommandInTerminal(['configure', `--${cacheOption.value}=${action}`]);
+                        await celer.runCommandInTerminal(['configure', `--pkgcache-writable=${action}`]);
                     }
                 }
                 break;

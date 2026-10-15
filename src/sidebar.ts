@@ -54,6 +54,32 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                 }
                 break;
             }
+            case 'pkgcache': {
+                const { backend, fsDir, host, accessKey, secretKey } = msg.value || {};
+                let args: string[];
+                if (backend === 'fs') {
+                    if (!fsDir) { return; }
+                    args = ['configure', `--pkgcache-fs-dir="${fsDir}"`];
+                } else if (backend === 'minio') {
+                    if (!host || !accessKey || !secretKey) { return; }
+                    args = [
+                        'configure',
+                        `--pkgcache-minio-host=${host}`,
+                        `--pkgcache-minio-access-key=${accessKey}`,
+                        `--pkgcache-minio-secret-key=${secretKey}`,
+                    ];
+                } else {
+                    return;
+                }
+                try {
+                    await this.celerManager.runCommand(args);
+                    vscode.window.showInformationMessage(`Celer: pkgcache backend \u2192 ${backend}`);
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Celer: failed to configure pkgcache \u2014 ${error instanceof Error ? error.message : error}`);
+                }
+                await this.refresh();
+                break;
+            }
             case 'command': {
                 vscode.commands.executeCommand(msg.id);
                 break;
@@ -122,9 +148,9 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
         });
 
         const combos = [
-            this.comboboxHtml('platform', 'Selected platform:', platform, platforms),
-            this.comboboxHtml('project', 'Selected project:', project, projects),
-            this.comboboxHtml('buildType', 'Selected build type:', buildType, buildTypes),
+            this.comboboxHtml('platform', 'Platform:', platform, platforms),
+            this.comboboxHtml('project', 'project:', project, projects),
+            this.comboboxHtml('buildType', 'Build type:', buildType, buildTypes),
             this.comboboxHtml('jobs', 'Build jobs:', jobsLabel, jobOptions),
         ].join('\n');
 
@@ -305,12 +331,13 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
     .setting-group.open .setting-group-body { display: block; }
     .setting-group.open .setting-group-header { border-bottom: 1px solid var(--input-border); }
 
-    .setup-form {
-        margin: 4px 8px; padding: 8px 10px; border: 1px solid var(--input-border);
-        border-radius: var(--radius); box-shadow: 0 1px 2px rgba(0,0,0,0.06);
-    }
-    .setup-form + .setup-form { margin-top: 6px; }
+    .setup-form { padding: 4px 10px 8px; }
     .setup-title { font-size: 11px; font-weight: 600; margin-bottom: 5px; color: var(--fg-muted); letter-spacing: 0.3px; }
+    .setup-subtitle { font-size: 10px; font-weight: 600; margin-bottom: 4px; color: var(--fg-muted); letter-spacing: 0.3px; }
+    .setup-title-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; }
+    .setup-title-row .setup-title { margin-bottom: 0; }
+    .setup-title-toggle { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+    .setup-toggle-label { font-size: 10px; font-weight: 600; color: var(--fg-muted); letter-spacing: 0.3px; cursor: pointer; }
     .setup-input {
         flex: 1; background: var(--input-bg); color: var(--input-fg);
         border: 1px solid var(--input-border); padding: 5px 8px; font-size: 11px;
@@ -321,6 +348,8 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
     .setup-input:focus { border-color: var(--focus-border); }
     .setup-row { display: flex; }
     .setup-row + .setup-input, .setup-row + .setup-row { margin-top: 4px; }
+    .pk-backend-fields { margin-top: 8px; }
+    .pk-backend-fields > .setup-subtitle + .setup-input { margin-top: 0; }
     .setup-folder {
         background: var(--input-bg); border: 1px solid var(--input-border);
         border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
@@ -329,16 +358,16 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
     }
     .setup-folder:hover { background: var(--hover-bg); }
     .setup-actions { display: flex; gap: 6px; margin-top: 6px; justify-content: flex-end; }
-    .btn-setup, .btn-remove {
+    .btn-setup, .btn-remove, .btn-cache-setup {
         border: none; border-radius: var(--radius-sm); padding: 5px 14px; font-size: 11px;
         cursor: pointer; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase;
         transition: background .15s, box-shadow .15s;
     }
     .btn-remove { background: var(--btn-secondary-bg); color: var(--btn-secondary-fg); border: 1px solid var(--input-border); }
     .btn-remove:hover:not(:disabled) { background: var(--btn-secondary-hover); box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
-    .btn-setup { background: var(--btn-bg); color: var(--btn-fg); }
-    .btn-setup:hover:not(:disabled) { background: var(--btn-hover); box-shadow: 0 1px 4px rgba(0,0,0,0.18); }
-    .btn-setup:disabled, .btn-remove:disabled { opacity: 0.35; cursor: default; }
+    .btn-setup, .btn-cache-setup { background: var(--btn-bg); color: var(--btn-fg); }
+    .btn-setup:hover:not(:disabled), .btn-cache-setup:hover:not(:disabled) { background: var(--btn-hover); box-shadow: 0 1px 4px rgba(0,0,0,0.18); }
+    .btn-setup:disabled, .btn-remove:disabled, .btn-cache-setup:disabled { opacity: 0.35; cursor: default; }
 </style>
 </head>
 <body>
@@ -461,7 +490,7 @@ document.querySelectorAll('.setting-val').forEach(input => {
     });
 });
 
-document.querySelectorAll('.setting-folder').forEach(btn => {
+document.querySelectorAll('.setting-folder, .setup-folder').forEach(btn => {
     btn.addEventListener('click', () => vscodeApi.postMessage({ type: 'pickFolder', key: btn.dataset.folder }));
 });
 
@@ -503,6 +532,50 @@ document.querySelectorAll('.btn-setup, .btn-remove').forEach(btn => {
                       document.getElementById('proxy-port').value.trim();
         vscodeApi.postMessage({ type: 'setup', mode: 'proxy', value, remove });
     });
+});
+
+// ── Package cache backend form ──
+(function() {
+    var backend = document.getElementById('pkgcache-backend');
+    var setupBtn = document.querySelector('.btn-cache-setup[data-cache-setup]');
+    if (!backend || !setupBtn) { return; }
+    function val(id) { var el = document.getElementById(id); return el ? el.value.trim() : ''; }
+    function isValid(mode) {
+        if (mode === 'fs') { return val('pkgcache-fs-dir') !== ''; }
+        if (mode === 'minio') {
+            return val('pkgcache-minio-host') !== '' && val('pkgcache-minio-access-key') !== '' && val('pkgcache-minio-secret-key') !== '';
+        }
+        return false;
+    }
+    function sync() {
+        var mode = backend.value;
+        document.querySelectorAll('.pk-backend-fields').forEach(function(f) {
+            f.style.display = f.dataset.backend === mode ? '' : 'none';
+        });
+        setupBtn.disabled = !isValid(mode);
+    }
+    backend.addEventListener('change', sync);
+    ['pkgcache-fs-dir', 'pkgcache-minio-host', 'pkgcache-minio-access-key', 'pkgcache-minio-secret-key'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) { el.addEventListener('input', sync); }
+    });
+    setupBtn.addEventListener('click', function() {
+        vscodeApi.postMessage({ type: 'pkgcache', value: {
+            backend: backend.value,
+            fsDir: val('pkgcache-fs-dir'),
+            host: val('pkgcache-minio-host'),
+            accessKey: val('pkgcache-minio-access-key'),
+            secretKey: val('pkgcache-minio-secret-key')
+        }});
+    });
+    sync();
+})();
+
+// The pkgcache writable switch sits on the group's title line; make its caption clickable too.
+document.querySelectorAll('.setup-title-toggle').forEach(function(wrap) {
+    var cb = wrap.querySelector('input[type=checkbox]');
+    var caption = wrap.querySelector('.setup-toggle-label');
+    if (cb && caption) { caption.addEventListener('click', function() { cb.click(); }); }
 });
 
 document.querySelectorAll('.drawer-header').forEach(header => {
@@ -548,6 +621,16 @@ document.querySelectorAll('.setting-group-header').forEach(header => {
         const e = (s: any) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
         const dlHint = e(wsRoot.replace(/\\/g, '/') + '/downloads');
 
+        // pkgcache supports two mutually exclusive backends: a shared filesystem
+        // directory (`[pkgcache.fs] dir`) or a MinIO/S3 bucket (`[pkgcache.minio]`).
+        const pk = pkgcache || {};
+        const pkFs = pk.fs || {};
+        const pkMinio = pk.minio || {};
+        const pkBackend = pk.minio ? 'minio' : (pk.fs ? 'fs' : 'none');
+        const pkShow = (mode: string) => pkBackend === mode ? '' : ' style="display:none"';
+        // An absent `writable` means the CLI's default of true.
+        const pkWritable = pk.writable === undefined ? true : pk.writable;
+
         const toggle = (key: string, label: string, checked: any) => `
         <div class="setting-row">
             <span class="setting-label">${label}</span>
@@ -581,16 +664,41 @@ document.querySelectorAll('.setting-group-header').forEach(header => {
                 </div>
             </div>` +
             group('pkgcache', 'Package Cache',
-                textRow('pkgcache-dir', 'Cache Dir', pkgcache.dir, true) +
-                toggle('pkgcache-writable', 'Writable', pkgcache.writable) +
-                toggle('pkgcache-cache-artifacts', 'Cache Artifacts', pkgcache.cache_artifacts) +
-                toggle('pkgcache-cache-downloads', 'Cache Downloads', pkgcache.cache_downloads)
+                `<div class="setup-form">
+                    <div class="setup-title-row">
+                        <span class="setup-title">Storage Backend</span>
+                        <span class="setup-title-toggle" title="Allow this node to write the package cache">
+                            <span class="setup-toggle-label">Writable</span>
+                            <label class="toggle"><input type="checkbox" data-key="pkgcache-writable" ${pkWritable ? 'checked' : ''}><span class="toggle-slider"></span></label>
+                        </span>
+                    </div>
+                    <select class="setup-input" id="pkgcache-backend">
+                        <option value="none"${pkBackend === 'none' ? ' selected' : ''}>Not configured</option>
+                        <option value="fs"${pkBackend === 'fs' ? ' selected' : ''}>File System (shared directory)</option>
+                        <option value="minio"${pkBackend === 'minio' ? ' selected' : ''}>MinIO (S3 bucket)</option>
+                    </select>
+                    <div class="pk-backend-fields" data-backend="fs"${pkShow('fs')}>
+                        <div class="setup-subtitle">File System</div>
+                        <div class="setup-row">
+                            <input class="setup-input" type="text" id="pkgcache-fs-dir" placeholder="Cache directory" value="${e(pkFs.dir)}">
+                            <button class="setup-folder" data-folder="pkgcache-fs-dir">\u{1F4C1}</button>
+                        </div>
+                    </div>
+                    <div class="pk-backend-fields" data-backend="minio"${pkShow('minio')}>
+                        <div class="setup-subtitle">MinIO</div>
+                        <input class="setup-input" type="text" id="pkgcache-minio-host" placeholder="http://minio.example.com:9000 (S3 API port)" value="${e(pkMinio.host)}">
+                        <input class="setup-input" type="text" id="pkgcache-minio-access-key" placeholder="Access key" value="${e(pkMinio.access_key)}">
+                        <input class="setup-input" type="password" id="pkgcache-minio-secret-key" placeholder="Secret key" value="${e(pkMinio.secret_key)}">
+                    </div>
+                    <div class="setup-actions">
+                        <button class="btn-cache-setup" data-cache-setup="1">Setup</button>
+                    </div>
+                </div>`
             ) +
             `<div class="setting-group" data-group="proxy">
                 <div class="setting-group-header">HTTP(S) Proxy</div>
                 <div class="setting-group-body">
                     <div class="setup-form">
-                        <div class="setup-title">Proxy Settings</div>
                         <input class="setup-input" type="text" id="proxy-host" placeholder="Host: proxy.example.com" value="${e(proxy.host)}">
                         <input class="setup-input" type="number" id="proxy-port" placeholder="Port: 8080" value="${e(proxy.port)}">
                         <div class="setup-actions">
