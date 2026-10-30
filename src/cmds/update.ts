@@ -41,7 +41,6 @@ export function registerUpdateCommand(context: vscode.ExtensionContext, celer: C
                 const selectedLabels = new Set<string>();
 
                 const qp = vscode.window.createQuickPick<(typeof allItems)[0]>();
-                qp.title = 'Celer Update Ports';
                 qp.placeholder = 'Type to search, Space to select';
                 qp.canSelectMany = true;
                 qp.items = allItems;

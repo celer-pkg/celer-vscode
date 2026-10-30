@@ -8,12 +8,11 @@ import { Celer } from '../celer';
 export function registerSelectCommands(context: vscode.ExtensionContext, celer: Celer): void {
     // Helper: show a QuickPick that auto-focuses on the current item
     async function pickCurrent<T extends vscode.QuickPickItem>(
-        title: string, placeHolder: string,
+        placeHolder: string,
         items: T[], currentIndex: number,
         onSelect: (item: T) => Promise<void>
     ): Promise<void> {
         const qp = vscode.window.createQuickPick<T>();
-        qp.title = title;
         qp.placeholder = placeHolder;
         qp.items = items;
         // Scroll to & highlight the current item
@@ -55,7 +54,7 @@ export function registerSelectCommands(context: vscode.ExtensionContext, celer: 
         }));
         const idx = items.findIndex(i => i.platform === currentPlatform);
 
-        await pickCurrent('Celer Platform', 'Select a platform', items, idx, async (item: any) => {
+        await pickCurrent('Select a platform', items, idx, async (item: any) => {
             await celer.runCommand(['configure', `--platform=${item.platform}`]);
             vscode.commands.executeCommand('celer.sidebarRefresh');
             vscode.window.showInformationMessage(`Platform set to: ${item.platform}`);
@@ -86,7 +85,7 @@ export function registerSelectCommands(context: vscode.ExtensionContext, celer: 
         }));
         const idx = items.findIndex(i => i.project === currentProject);
 
-        await pickCurrent('Celer Project', 'Select a project', items, idx, async (item: any) => {
+        await pickCurrent('Select a project', items, idx, async (item: any) => {
             await celer.runCommand(['configure', `--project=${item.project}`]);
             vscode.commands.executeCommand('celer.sidebarRefresh');
             vscode.window.showInformationMessage(`Project set to: ${item.project}`);
@@ -112,7 +111,7 @@ export function registerSelectCommands(context: vscode.ExtensionContext, celer: 
         }));
         const idx = items.findIndex(i => i.buildType.toLowerCase() === currentBuildType);
 
-        await pickCurrent('Celer Build Type', 'Select a build type', items, idx, async (item: any) => {
+        await pickCurrent('Select a build type', items, idx, async (item: any) => {
             await celer.runCommand(['configure', `--build-type=${item.buildType}`]);
             vscode.commands.executeCommand('celer.sidebarRefresh');
             vscode.window.showInformationMessage(`Build type set to: ${item.buildType}`);
@@ -166,7 +165,6 @@ export function registerSelectJobsCommand(
             const idx = items.findIndex(i => i.value === currentJobs);
 
             const qp = vscode.window.createQuickPick<(typeof items)[0]>();
-            qp.title = 'Celer Build Jobs';
             qp.placeholder = `Select parallel build jobs (1-${cpuCount} cores available)`;
             qp.items = items;
             if (idx >= 0) {

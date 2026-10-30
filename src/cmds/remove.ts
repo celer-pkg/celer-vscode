@@ -17,8 +17,7 @@ export function registerRemoveCommand(context: vscode.ExtensionContext, celer: C
 
         // Create quick pick with all packages pre-populated
         const quickPick = vscode.window.createQuickPick();
-        quickPick.title = `Remove Package (${installedPackages.length} installed)`;
-        quickPick.placeholder = 'Type to filter installed packages (supports wildcards * and ?)';
+        quickPick.placeholder = `Type to filter ${installedPackages.length} installed packages (supports wildcards * and ?)`;
         quickPick.matchOnDescription = true;
 
         const createPkgItems = (pkgs: string[], filterPattern: string) => {

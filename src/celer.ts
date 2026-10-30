@@ -16,6 +16,8 @@ export interface CelerConfig {
 export class Celer {
     private outputChannel: vscode.OutputChannel;
     private celerPath: string;
+    /** Cached short version string, e.g. "v0.0.9". */
+    private celerVersion?: string;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Celer');
@@ -86,6 +88,42 @@ export class Celer {
             vscode.commands.executeCommand('celer.installCelerExecutable');
         }
         return false;
+    }
+
+    /**
+     * Version of the installed celer CLI (e.g. "v0.0.9"), or undefined when celer is
+     * unavailable. Uses `celer version -s`; older builds without that flag fall back to
+     * parsing the version out of the full banner. A successful result is cached.
+     */
+    public async getCelerVersion(): Promise<string | undefined> {
+        if (this.celerVersion) { return this.celerVersion; }
+        // Check availability first: runCommand() would pop an install dialog otherwise.
+        if (!this.isAvailable()) {
+            this.outputChannel.appendLine('[WARN] getCelerVersion: celer executable not found, version will not be shown');
+            return undefined;
+        }
+
+        let raw: string | undefined;
+        try {
+            raw = await this.runCommand(['version', '-s']);
+        } catch {
+            try {
+                const banner = await this.runCommand(['version']);
+                const match = banner.match(/\bv(\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?)/i);
+                raw = match ? `v${match[1]}` : banner.split(/\r?\n/).map(line => line.trim()).find(Boolean);
+            } catch (error) {
+                this.outputChannel.appendLine(`[WARN] getCelerVersion failed: ${error instanceof Error ? error.message : error}`);
+                return undefined;
+            }
+        }
+
+        const version = (raw || '').split(/\r?\n/).map(line => line.trim()).find(Boolean);
+        if (!version) {
+            this.outputChannel.appendLine('[WARN] getCelerVersion: could not parse the version output');
+            return undefined;
+        }
+        this.celerVersion = /^\d/.test(version) ? `v${version}` : version;
+        return this.celerVersion;
     }
 
     public async runCommandInTerminal(args: string[]): Promise<void> {

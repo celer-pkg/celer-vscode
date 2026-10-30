@@ -16,24 +16,62 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
         this._view = webviewView;
         webviewView.webview.options = { enableScripts: true, localResourceRoots: [] };
         webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
+        webviewView.onDidDispose(() => {
+            if (this._view === webviewView) { this._view = undefined; }
+        });
         this.refresh();
     }
 
     async refresh(): Promise<void> {
         if (!this._view) { return; }
-        this._view.webview.html = await this.buildHtml();
+        const [html] = await Promise.all([this.buildHtml(), this.updateTitle()]);
+        if (!this._view) { return; }
+        this._view.webview.html = html;
+    }
+
+    /** Views render as "Celer: <title>", and long descriptions get clipped first, so the
+     *  version has to live inside the title to stay visible. */
+    private async updateTitle(): Promise<void> {
+        const version = await this.celerManager.getCelerVersion();
+        if (!this._view) { return; }
+        this._view.title = version
+            ? `C/C++ Package Manager - ${version}`
+            : 'C/C++ Package Manager';
+        this._view.description = undefined;
+    }
+
+    /** Reduce a command failure to a single readable line for a notification. */
+    private describeError(error: unknown): string {
+        const text = error instanceof Error ? error.message : String(error);
+        const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        // runCommand prefixes failures with "Celer command failed with code N:" — the CLI's
+        // own message is the line after it and is far more useful to show.
+        return lines.find(line => !line.startsWith('Celer command failed')) || lines[0] || 'unknown error';
     }
 
     private async handleMessage(msg: any): Promise<void> {
         switch (msg.type) {
             case 'select': {
                 const { id, value } = msg;
-                switch (id) {
-                    case 'platform': await this.celerManager.runCommand(['configure', `--platform=${value}`]); break;
-                    case 'project': await this.celerManager.runCommand(['configure', `--project=${value}`]); break;
-                    case 'buildType': await this.celerManager.runCommand(['configure', `--build-type=${value}`]); break;
-                    case 'jobs': await this.celerManager.runCommand(['configure', `--jobs=${value}`]); break;
+                const selectTargets: Record<string, { flag: string; label: string }> = {
+                    platform: { flag: '--platform', label: 'Platform' },
+                    project: { flag: '--project', label: 'Project' },
+                    buildType: { flag: '--build-type', label: 'Build type' },
+                    jobs: { flag: '--jobs', label: 'Build jobs' },
+                };
+                const target = selectTargets[id];
+                if (!target) { break; }
+
+                try {
+                    await this.celerManager.runCommand(['configure', `${target.flag}=${value}`]);
+                    vscode.window.showInformationMessage(`${target.label} set to ${value}`);
+                } catch (error) {
+                    vscode.window.showErrorMessage(
+                        `Failed to set ${target.label} to ${value} \u2014 ${this.describeError(error)}`
+                    );
                 }
+                // Re-render either way so the combobox reflects what celer.toml actually holds
+                // (a failed switch must revert the value the user picked).
                 await this.refresh();
                 break;
             }
@@ -41,7 +79,7 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                 const key = msg.key;
                 const value = msg.value;
                 await this.celerManager.runCommand(['configure', `--${key}=${value}`]);
-                vscode.window.showInformationMessage(`Celer: ${key} → ${value}`);
+                vscode.window.showInformationMessage(`${key} \u2192 ${value}`);
                 break;
             }
             case 'pickFolder': {
@@ -73,9 +111,9 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                 }
                 try {
                     await this.celerManager.runCommand(args);
-                    vscode.window.showInformationMessage(`Celer: pkgcache backend \u2192 ${backend}`);
+                    vscode.window.showInformationMessage(`pkgcache backend \u2192 ${backend}`);
                 } catch (error) {
-                    vscode.window.showErrorMessage(`Celer: failed to configure pkgcache \u2014 ${error instanceof Error ? error.message : error}`);
+                    vscode.window.showErrorMessage(`Failed to configure pkgcache \u2014 ${error instanceof Error ? error.message : error}`);
                 }
                 await this.refresh();
                 break;
@@ -397,7 +435,6 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
             <button class="cmd-btn" data-cmd="celer.reverse"><span class="cmd-icon">\u{1F517}</span> Reverse</button>
             <button class="cmd-btn" data-cmd="celer.deploy"><span class="cmd-icon">\u{1F680}</span> Deploy</button>
             <button class="cmd-btn" data-cmd="celer.strip"><span class="cmd-icon">\u{2702}</span> Strip</button>
-            <button class="cmd-btn" data-cmd="celer.version"><span class="cmd-icon">\u{2139}</span> Version</button>
         </div>
     </div>
 </div>

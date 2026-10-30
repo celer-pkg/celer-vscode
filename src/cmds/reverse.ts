@@ -87,7 +87,6 @@ export function registerReverseCommand(context: vscode.ExtensionContext, celer: 
             ],
             { 
                 placeHolder: 'Select options (Space to toggle, Enter to confirm)',
-                title: 'Reverse Dependency Lookup Options',
                 canPickMany: true
             }
         );

@@ -7,14 +7,14 @@ import { Celer } from '../celer';
 export function registerConfigureCommand(context: vscode.ExtensionContext, celer: Celer): void {
     context.subscriptions.push(vscode.commands.registerCommand('celer.configure', async () => {
         // Helper: show a boolean picker that auto-focuses on the current value
-        async function pickBool(title: string, currentValue: string | boolean | undefined): Promise<string | undefined> {
+        async function pickBool(label: string, currentValue: string | boolean | undefined): Promise<string | undefined> {
             const isTrue = currentValue === true || currentValue === 'true';
             const items = [
                 { label: 'Enable',  value: 'true',  picked: isTrue },
                 { label: 'Disable', value: 'false', picked: !isTrue },
             ];
             const qp = vscode.window.createQuickPick<(typeof items)[0]>();
-            qp.title = title;
+            qp.placeholder = label;
             qp.items = items;
             qp.activeItems = [isTrue ? items[0] : items[1]];
             return new Promise(resolve => {
@@ -25,9 +25,8 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
         }
 
         // Helper: open a native folder picker and return the selected path
-        async function pickDir(title: string): Promise<string | undefined> {
+        async function pickDir(): Promise<string | undefined> {
             const uris = await vscode.window.showOpenDialog({
-                title,
                 canSelectFolders: true,
                 canSelectFiles: false,
                 canSelectMany: false,
@@ -109,7 +108,7 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                 if (!cacheOption) { return; }
 
                 if (cacheOption.value === 'fs') {
-                    const dir = await pickDir('Select Package Cache Directory');
+                    const dir = await pickDir();
                     if (dir) {
                         await celer.runCommandInTerminal(['configure', `--pkgcache-fs-dir="${dir}"`]);
                     }
@@ -146,7 +145,7 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
             }
 
             case 'downloads': {
-                const value = await pickDir('Select Downloads Directory');
+                const value = await pickDir();
                 if (value) {
                     await celer.runCommandInTerminal(['configure', `--downloads=${value}`]);
                 }
@@ -233,7 +232,7 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                         await celer.runCommandInTerminal(['configure', `--${ccacheOption.value}=${action}`]);
                     }
                 } else if (ccacheOption.value === 'ccache-dir') {
-                    const value = await pickDir('Select CCache Directory');
+                    const value = await pickDir();
                     if (value) {
                         await celer.runCommandInTerminal(['configure', `--ccache-dir=${value}`]);
                     }

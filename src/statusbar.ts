@@ -65,7 +65,7 @@ export class StatusBarManager {
 
         const selected = await vscode.window.showQuickPick(items, {
             placeHolder: 'Check buttons to show on status bar',
-            title: 'Celer Status Bar',
+            title: 'Status Bar',
             canPickMany: true,
         });
 

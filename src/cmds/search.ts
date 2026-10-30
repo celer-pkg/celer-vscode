@@ -20,7 +20,6 @@ export function registerSearchCommand(context: vscode.ExtensionContext, celer: C
         });
 
         const qp = vscode.window.createQuickPick<(typeof allItems)[0]>();
-        qp.title = 'Celer Search Ports';
         qp.placeholder = 'Type to search ports (e.g. zlib, eigen, boost)';
         qp.matchOnDescription = true;
         qp.matchOnDetail = true;

@@ -2,7 +2,7 @@
   "name": "celer",
   "displayName": "Celer - C/C++ Package Manager Tools",
   "description": "Extended Celer support in Visual Studio Code",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "celer",
   "icon": "resources/logo.png",
   "repository": {

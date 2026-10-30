@@ -37,7 +37,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // First time setup - auto download and integrate celer
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: 'Celer Extension - First Time Setup',
+            title: 'First Time Setup',
             cancellable: false
         }, async (progress) => {
             progress.report({ message: 'Checking for Celer executable...' });

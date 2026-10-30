@@ -127,7 +127,6 @@ export function registerTreeCommand(context: vscode.ExtensionContext, celer: Cel
             ],
             { 
                 placeHolder: 'Select options (Space to toggle, Enter to confirm)',
-                title: 'Dependency Tree Options',
                 canPickMany: true
             }
         );
