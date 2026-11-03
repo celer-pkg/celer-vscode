@@ -87,7 +87,7 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                 // pkgcache has two mutually exclusive storage backends:
                 //   fs    -> [pkgcache.fs] dir            (--pkgcache-fs-dir)
                 //   minio -> [pkgcache.minio] host/keys   (--pkgcache-minio-*)
-                // `writable` lives on [pkgcache] itself and applies to either backend.
+                // `readonly` and `keep_artifact_count` live on [pkgcache] itself and apply to either backend.
                 const pk = toml.pkgcache || {};
                 const pkFs = pk.fs || {};
                 const pkMinio = pk.minio || {};
@@ -101,7 +101,8 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                     [
                         { label: '$(folder) File System Backend', value: 'fs', description: 'Cache to a shared directory (mutually exclusive with MinIO)' },
                         { label: '$(cloud) MinIO Backend', value: 'minio', description: 'Cache to a MinIO/S3 bucket (mutually exclusive with File System)' },
-                        { label: '$(lock) Cache Writable', value: 'pkgcache-writable', description: `Allow this node to write the cache (${pk.writable === undefined ? 'ON (default)' : onOff(pk.writable)})` }
+                        { label: '$(lock) Cache Readonly', value: 'pkgcache-readonly', description: `Force this node to treat the cache as read-only (${pk.readonly === undefined ? 'OFF (default)' : onOff(pk.readonly)})` },
+                        { label: '$(trash) Keep Artifact Count', value: 'pkgcache-keep-artifact-count', description: `Keep only the newest N artifacts per port, 0 disables pruning (${pk.keep_artifact_count === undefined ? 'unset' : pk.keep_artifact_count})` }
                     ],
                     { placeHolder: `Select package cache storage backend (current: ${currentBackend})` }
                 );
@@ -135,11 +136,21 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                         `--pkgcache-minio-access-key=${accessKey}`,
                         `--pkgcache-minio-secret-key=${secretKey}`
                     ]);
-                } else {
-                    const action = await pickBool('Cache Writable', pk.writable);
+                } else if (cacheOption.value === 'pkgcache-readonly') {
+                    const action = await pickBool('Cache Readonly', pk.readonly);
                     if (action) {
-                        await celer.runCommandInTerminal(['configure', `--pkgcache-writable=${action}`]);
+                        await celer.runCommandInTerminal(['configure', `--pkgcache-readonly=${action}`]);
                     }
+                } else if (cacheOption.value === 'pkgcache-keep-artifact-count') {
+                    const input = await vscode.window.showInputBox({
+                        prompt: 'Keep only the newest N artifacts per port (0 disables pruning)',
+                        placeHolder: '0',
+                        value: pk.keep_artifact_count !== undefined ? String(pk.keep_artifact_count) : '0',
+                        validateInput: (s) => /^\d+$/.test(s.trim()) ? undefined : 'Enter a non-negative integer',
+                    });
+                    if (input === undefined) { return; }
+                    const n = input.trim();
+                    await celer.runCommandInTerminal(['configure', `--pkgcache-keep-artifact-count=${n}`]);
                 }
                 break;
             }

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as os from 'os';
 import { Celer } from './celer';
+import { tomlKeyOf } from './tomlkeys';
 
 export class CelerSidebarProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'celer.sidebar';
@@ -64,7 +65,7 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
 
                 try {
                     await this.celerManager.runCommand(['configure', `${target.flag}=${value}`]);
-                    vscode.window.showInformationMessage(`${target.label} set to ${value}`);
+                    vscode.window.setStatusBarMessage(`${tomlKeyOf(target.flag)} -> ${value}`, 4000);
                 } catch (error) {
                     vscode.window.showErrorMessage(
                         `Failed to set ${target.label} to ${value} \u2014 ${this.describeError(error)}`
@@ -78,8 +79,15 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
             case 'setting': {
                 const key = msg.key;
                 const value = msg.value;
-                await this.celerManager.runCommand(['configure', `--${key}=${value}`]);
-                vscode.window.showInformationMessage(`${key} \u2192 ${value}`);
+                try {
+                    await this.celerManager.runCommand(['configure', `--${key}=${value}`]);
+                    vscode.window.setStatusBarMessage(`${tomlKeyOf(key)} -> ${value}`, 4000);
+                } catch (error) {
+                    vscode.window.showErrorMessage(
+                        `Failed to configure ${tomlKeyOf(key)} \u2014 ${error instanceof Error ? error.message : error}`
+                    );
+                }
+                await this.refresh();
                 break;
             }
             case 'pickFolder': {
@@ -95,9 +103,11 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
             case 'pkgcache': {
                 const { backend, fsDir, host, accessKey, secretKey } = msg.value || {};
                 let args: string[];
+                let tomlPaths: string[];
                 if (backend === 'fs') {
                     if (!fsDir) { return; }
                     args = ['configure', `--pkgcache-fs-dir="${fsDir}"`];
+                    tomlPaths = [tomlKeyOf('pkgcache-fs-dir')];
                 } else if (backend === 'minio') {
                     if (!host || !accessKey || !secretKey) { return; }
                     args = [
@@ -106,12 +116,17 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                         `--pkgcache-minio-access-key=${accessKey}`,
                         `--pkgcache-minio-secret-key=${secretKey}`,
                     ];
+                    tomlPaths = [
+                        tomlKeyOf('pkgcache-minio-host'),
+                        tomlKeyOf('pkgcache-minio-access-key'),
+                        tomlKeyOf('pkgcache-minio-secret-key'),
+                    ];
                 } else {
                     return;
                 }
                 try {
                     await this.celerManager.runCommand(args);
-                    vscode.window.showInformationMessage(`pkgcache backend \u2192 ${backend}`);
+                    vscode.window.setStatusBarMessage(`${tomlPaths.join(', ')} -> updated`, 4000);
                 } catch (error) {
                     vscode.window.showErrorMessage(`Failed to configure pkgcache \u2014 ${error instanceof Error ? error.message : error}`);
                 }
@@ -608,7 +623,7 @@ document.querySelectorAll('.btn-setup, .btn-remove').forEach(btn => {
     sync();
 })();
 
-// The pkgcache writable switch sits on the group's title line; make its caption clickable too.
+// The pkgcache readonly switch sits on the group's title line; make its caption clickable too.
 document.querySelectorAll('.setup-title-toggle').forEach(function(wrap) {
     var cb = wrap.querySelector('input[type=checkbox]');
     var caption = wrap.querySelector('.setup-toggle-label');
@@ -665,8 +680,8 @@ document.querySelectorAll('.setting-group-header').forEach(header => {
         const pkMinio = pk.minio || {};
         const pkBackend = pk.minio ? 'minio' : (pk.fs ? 'fs' : 'none');
         const pkShow = (mode: string) => pkBackend === mode ? '' : ' style="display:none"';
-        // An absent `writable` means the CLI's default of true.
-        const pkWritable = pk.writable === undefined ? true : pk.writable;
+        // An absent `readonly` means the CLI's default of false (cache is writable).
+        const pkReadonly = pk.readonly === undefined ? false : pk.readonly;
 
         const toggle = (key: string, label: string, checked: any) => `
         <div class="setting-row">
@@ -704,9 +719,9 @@ document.querySelectorAll('.setting-group-header').forEach(header => {
                 `<div class="setup-form">
                     <div class="setup-title-row">
                         <span class="setup-title">Storage Backend</span>
-                        <span class="setup-title-toggle" title="Allow this node to write the package cache">
-                            <span class="setup-toggle-label">Writable</span>
-                            <label class="toggle"><input type="checkbox" data-key="pkgcache-writable" ${pkWritable ? 'checked' : ''}><span class="toggle-slider"></span></label>
+                        <span class="setup-title-toggle" title="Force this node to treat the package cache as read-only">
+                            <span class="setup-toggle-label">Readonly</span>
+                            <label class="toggle"><input type="checkbox" data-key="pkgcache-readonly" ${pkReadonly ? 'checked' : ''}><span class="toggle-slider"></span></label>
                         </span>
                     </div>
                     <select class="setup-input" id="pkgcache-backend">
@@ -726,6 +741,10 @@ document.querySelectorAll('.setting-group-header').forEach(header => {
                         <input class="setup-input" type="text" id="pkgcache-minio-host" placeholder="http://minio.example.com:9000 (S3 API port)" value="${e(pkMinio.host)}">
                         <input class="setup-input" type="text" id="pkgcache-minio-access-key" placeholder="Access key" value="${e(pkMinio.access_key)}">
                         <input class="setup-input" type="password" id="pkgcache-minio-secret-key" placeholder="Secret key" value="${e(pkMinio.secret_key)}">
+                    </div>
+                    <div class="pk-keep" style="margin-top:8px">
+                        <div class="setup-subtitle">Keep Artifacts</div>
+                        <input class="setting-val" type="number" min="0" step="1" data-key="pkgcache-keep-artifact-count" value="${e(pk.keep_artifact_count ?? '')}" placeholder="0 = no pruning" style="width:100%;margin-top:4px;padding:5px 8px">
                     </div>
                     <div class="setup-actions">
                         <button class="btn-cache-setup" data-cache-setup="1">Setup</button>

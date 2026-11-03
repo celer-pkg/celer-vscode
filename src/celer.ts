@@ -3,6 +3,7 @@ import * as cp from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { parse as tomlParse } from '@ltd/j-toml';
+import { tomlKeyOf } from './tomlkeys';
 
 export interface CelerConfig {
     platforms?: string[];
@@ -327,19 +328,19 @@ export class Celer {
             if (config.currentPlatform !== undefined) {
                 this.outputChannel.appendLine(`[INFO] Setting platform to: ${config.currentPlatform}`);
                 await this.runCommand(['configure', `--platform=${config.currentPlatform}`]);
-                this.outputChannel.appendLine(`[SUCCESS] Platform set to: ${config.currentPlatform}`);
+                vscode.window.setStatusBarMessage(`${tomlKeyOf('platform')} -> ${config.currentPlatform}`, 4000);
             }
 
             if (config.currentProject !== undefined) {
                 this.outputChannel.appendLine(`[INFO] Setting project to: ${config.currentProject}`);
                 await this.runCommand(['configure', `--project=${config.currentProject}`]);
-                this.outputChannel.appendLine(`[SUCCESS] Project set to: ${config.currentProject}`);
+                vscode.window.setStatusBarMessage(`${tomlKeyOf('project')} -> ${config.currentProject}`, 4000);
             }
 
             if (config.currentBuildType !== undefined) {
                 this.outputChannel.appendLine(`[INFO] Setting build type to: ${config.currentBuildType}`);
                 await this.runCommand(['configure', `--build-type=${config.currentBuildType}`]);
-                this.outputChannel.appendLine(`[SUCCESS] Build type set to: ${config.currentBuildType}`);
+                vscode.window.setStatusBarMessage(`${tomlKeyOf('build-type')} -> ${config.currentBuildType}`, 4000);
             }
 
             // Wait a bit for file system to sync

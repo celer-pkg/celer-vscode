@@ -44,7 +44,7 @@ export async function activate(context: vscode.ExtensionContext) {
             // true = auto install without prompt
             const installed = await celerInstaller.ensureCelerInstalled(true);
             if (installed) {
-                vscode.window.showInformationMessage('Celer extension initialized successfully!');
+                vscode.window.setStatusBarMessage('Celer extension initialized successfully!', 4000);
             }
         });
 
@@ -83,7 +83,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
         vscode.commands.registerCommand('celer.resetFirstRun', async () => {
             await context.globalState.update('celer.firstRun', true);
-            vscode.window.showInformationMessage('First run status reset. Please reload the window.');
+            vscode.window.setStatusBarMessage('First run status reset. Please reload the window.', 5000);
         })
     );
 

@@ -73,7 +73,7 @@ export class CelerInstaller {
             // Run celer integrate
             await this.runCelerIntegrate();
 
-            vscode.window.showInformationMessage('Celer installed and integrated successfully!');
+            vscode.window.setStatusBarMessage('Celer installed and integrated successfully!', 4000);
             return true;
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
