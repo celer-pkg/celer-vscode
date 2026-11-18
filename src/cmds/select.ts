@@ -2,10 +2,38 @@ import * as vscode from 'vscode';
 import * as os from 'os';
 import { Celer } from '../celer';
 
+/** Apply a configure selection and report failures in the Celer output. */
+async function applySelection(
+    celer: Celer, label: string, value: string, args: string[], successMessage: string
+): Promise<void> {
+    try {
+        await celer.runCommand(args);
+        vscode.commands.executeCommand('celer.sidebarRefresh');
+        vscode.window.setStatusBarMessage(successMessage, 4000);
+    } catch (error) {
+        celer.reportFailure(`Failed to set ${label} to ${value}`, error);
+    }
+}
+
 /**
  * Selection commands for platform, project, build type, and jobs
  */
 export function registerSelectCommands(context: vscode.ExtensionContext, celer: Celer): void {
+    // Select a project and report its target_platform (if the project defines one).
+    async function applyProject(project: string): Promise<void> {
+        try {
+            const result = await celer.selectProject(project);
+            vscode.commands.executeCommand('celer.sidebarRefresh');
+            const platform = result.platform ? ` (platform: ${result.platform})` : '';
+            const message = `Project set to ${project}${platform}`;
+            vscode.window.setStatusBarMessage(
+                result.warning ? `${message} — see Output for errors` : message,
+                result.warning ? 6000 : 4000
+            );
+        } catch (error) {
+            celer.reportFailure(`Failed to set Project to ${project}`, error);
+        }
+    }
     // Helper: show a QuickPick that auto-focuses on the current item
     async function pickCurrent<T extends vscode.QuickPickItem>(
         placeHolder: string,
@@ -33,9 +61,8 @@ export function registerSelectCommands(context: vscode.ExtensionContext, celer: 
     context.subscriptions.push(vscode.commands.registerCommand('celer.selectPlatform', async (args?: { platform?: string }) => {
         // Direct selection from tree view (no QuickPick)
         if (args?.platform) {
-            await celer.runCommand(['configure', `--platform=${args.platform}`]);
-            vscode.commands.executeCommand('celer.sidebarRefresh');
-            vscode.window.showInformationMessage(`Platform set to: ${args.platform}`);
+            await applySelection(celer, 'Platform', args.platform,
+                ['configure', `--platform=${args.platform}`], `Platform set to: ${args.platform}`);
             return;
         }
 
@@ -55,18 +82,15 @@ export function registerSelectCommands(context: vscode.ExtensionContext, celer: 
         const idx = items.findIndex(i => i.platform === currentPlatform);
 
         await pickCurrent('Select a platform', items, idx, async (item: any) => {
-            await celer.runCommand(['configure', `--platform=${item.platform}`]);
-            vscode.commands.executeCommand('celer.sidebarRefresh');
-            vscode.window.showInformationMessage(`Platform set to: ${item.platform}`);
+            await applySelection(celer, 'Platform', item.platform,
+                ['configure', `--platform=${item.platform}`], `Platform set to: ${item.platform}`);
         });
     }),
 
     vscode.commands.registerCommand('celer.selectProject', async (args?: { project?: string }) => {
         // Direct selection from tree view (no QuickPick)
         if (args?.project) {
-            await celer.runCommand(['configure', `--project=${args.project}`]);
-            vscode.commands.executeCommand('celer.sidebarRefresh');
-            vscode.window.showInformationMessage(`Project set to: ${args.project}`);
+            await applyProject(args.project);
             return;
         }
 
@@ -86,18 +110,15 @@ export function registerSelectCommands(context: vscode.ExtensionContext, celer: 
         const idx = items.findIndex(i => i.project === currentProject);
 
         await pickCurrent('Select a project', items, idx, async (item: any) => {
-            await celer.runCommand(['configure', `--project=${item.project}`]);
-            vscode.commands.executeCommand('celer.sidebarRefresh');
-            vscode.window.showInformationMessage(`Project set to: ${item.project}`);
+            await applyProject(item.project);
         });
     }),
 
     vscode.commands.registerCommand('celer.selectBuildType', async (args?: { buildType?: string }) => {
         // Direct selection from tree view (no QuickPick)
         if (args?.buildType) {
-            await celer.runCommand(['configure', `--build-type=${args.buildType}`]);
-            vscode.commands.executeCommand('celer.sidebarRefresh');
-            vscode.window.showInformationMessage(`Build type set to: ${args.buildType}`);
+            await applySelection(celer, 'Build type', args.buildType,
+                ['configure', `--build-type=${args.buildType}`], `Build type set to: ${args.buildType}`);
             return;
         }
 
@@ -112,9 +133,8 @@ export function registerSelectCommands(context: vscode.ExtensionContext, celer: 
         const idx = items.findIndex(i => i.buildType.toLowerCase() === currentBuildType);
 
         await pickCurrent('Select a build type', items, idx, async (item: any) => {
-            await celer.runCommand(['configure', `--build-type=${item.buildType}`]);
-            vscode.commands.executeCommand('celer.sidebarRefresh');
-            vscode.window.showInformationMessage(`Build type set to: ${item.buildType}`);
+            await applySelection(celer, 'Build type', item.buildType,
+                ['configure', `--build-type=${item.buildType}`], `Build type set to: ${item.buildType}`);
         });
     })
     );
@@ -131,9 +151,8 @@ export function registerSelectJobsCommand(
         vscode.commands.registerCommand('celer.selectJobs', async (args?: { jobs?: number }) => {
             // Direct selection from tree view (no QuickPick)
             if (args?.jobs !== undefined) {
-                await celer.runCommand(['configure', `--jobs=${args.jobs}`]);
-                vscode.commands.executeCommand('celer.sidebarRefresh');
-                vscode.window.showInformationMessage(`Build jobs set to: ${args.jobs}`);
+                await applySelection(celer, 'Build jobs', String(args.jobs),
+                    ['configure', `--jobs=${args.jobs}`], `Build jobs set to: ${args.jobs}`);
                 return;
             }
 
@@ -174,9 +193,8 @@ export function registerSelectJobsCommand(
                 const selected = qp.selectedItems[0];
                 if (selected) {
                     qp.hide();
-                    await celer.runCommand(['configure', `--jobs=${selected.value}`]);
-                    vscode.commands.executeCommand('celer.sidebarRefresh');
-                    vscode.window.showInformationMessage(`Build jobs set to: ${selected.value}`);
+                    await applySelection(celer, 'Build jobs', String(selected.value),
+                        ['configure', `--jobs=${selected.value}`], `Build jobs set to: ${selected.value}`);
                 }
             });
             qp.onDidHide(() => qp.dispose());

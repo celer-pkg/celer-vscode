@@ -53,8 +53,12 @@ export function registerSearchCommand(context: vscode.ExtensionContext, celer: C
                     await vscode.window.showTextDocument(doc);
                 } else {
                     // Also run celer search to show details
-                    await celer.runCommand(['search', selected.fullName]);
-                    celer.showOutput();
+                    try {
+                        await celer.runCommand(['search', selected.fullName]);
+                        celer.showOutput();
+                    } catch (error) {
+                        celer.reportFailure(`Failed to search ${selected.fullName}`, error);
+                    }
                 }
             }
         });

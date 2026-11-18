@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { Celer } from '../celer';
+import { tomlKeyOf } from '../tomlkeys';
 
 /**
  * Configure settings for your workspace.
@@ -33,6 +34,17 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                 openLabel: 'Select Folder',
             });
             return uris?.[0]?.fsPath;
+        }
+
+        // Run a configure command; failures go to the Celer output in celer's own
+        // multi-line format, successes are announced on the status bar.
+        async function applyConfig(context: string, args: string[], success: string): Promise<void> {
+            try {
+                await celer.runCommand(args);
+                vscode.window.setStatusBarMessage(success, 4000);
+            } catch (error) {
+                celer.reportFailure(context, error);
+            }
         }
 
         const toml = await celer.readFullToml();
@@ -70,7 +82,8 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
             case 'offline': {
                 const action = await pickBool('Offline Mode', main.offline);
                 if (action) {
-                    await celer.runCommandInTerminal(['configure', `--offline=${action}`]);
+                    await applyConfig('Failed to configure offline mode',
+                        ['configure', `--offline=${action}`], `${tomlKeyOf('offline')} -> ${action}`);
                 }
                 break;
             }
@@ -78,7 +91,8 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
             case 'verbose': {
                 const action = await pickBool('Verbose Output', main.verbose);
                 if (action) {
-                    await celer.runCommandInTerminal(['configure', `--verbose=${action}`]);
+                    await applyConfig('Failed to configure verbose output',
+                        ['configure', `--verbose=${action}`], `${tomlKeyOf('verbose')} -> ${action}`);
                 }
                 break;
             }
@@ -111,7 +125,9 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                 if (cacheOption.value === 'fs') {
                     const dir = await pickDir();
                     if (dir) {
-                        await celer.runCommandInTerminal(['configure', `--pkgcache-fs-dir="${dir}"`]);
+                        await applyConfig('Failed to configure pkgcache',
+                            ['configure', `--pkgcache-fs-dir=${dir}`],
+                            `${tomlKeyOf('pkgcache-fs-dir')} -> ${dir}`);
                     }
                 } else if (cacheOption.value === 'minio') {
                     const host = await vscode.window.showInputBox({
@@ -130,16 +146,18 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                         password: true
                     });
                     if (!secretKey) { return; }
-                    await celer.runCommandInTerminal([
+                    await applyConfig('Failed to configure pkgcache', [
                         'configure',
                         `--pkgcache-minio-host=${host}`,
                         `--pkgcache-minio-access-key=${accessKey}`,
                         `--pkgcache-minio-secret-key=${secretKey}`
-                    ]);
+                    ], `${tomlKeyOf('pkgcache-minio-host')} -> ${host}`);
                 } else if (cacheOption.value === 'pkgcache-readonly') {
                     const action = await pickBool('Cache Readonly', pk.readonly);
                     if (action) {
-                        await celer.runCommandInTerminal(['configure', `--pkgcache-readonly=${action}`]);
+                        await applyConfig('Failed to configure pkgcache',
+                            ['configure', `--pkgcache-readonly=${action}`],
+                            `${tomlKeyOf('pkgcache-readonly')} -> ${action}`);
                     }
                 } else if (cacheOption.value === 'pkgcache-keep-artifact-count') {
                     const input = await vscode.window.showInputBox({
@@ -150,7 +168,9 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                     });
                     if (input === undefined) { return; }
                     const n = input.trim();
-                    await celer.runCommandInTerminal(['configure', `--pkgcache-keep-artifact-count=${n}`]);
+                    await applyConfig('Failed to configure pkgcache',
+                        ['configure', `--pkgcache-keep-artifact-count=${n}`],
+                        `${tomlKeyOf('pkgcache-keep-artifact-count')} -> ${n}`);
                 }
                 break;
             }
@@ -158,7 +178,8 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
             case 'downloads': {
                 const value = await pickDir();
                 if (value) {
-                    await celer.runCommandInTerminal(['configure', `--downloads=${value}`]);
+                    await applyConfig('Failed to configure downloads',
+                        ['configure', `--downloads=${value}`], `${tomlKeyOf('downloads')} -> ${value}`);
                 }
                 break;
             }
@@ -185,7 +206,9 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                     }
                 });
                 if (value) {
-                    await celer.runCommandInTerminal(['configure', `--${proxyOption.value}=${value}`]);
+                    await applyConfig('Failed to configure proxy',
+                        ['configure', `--${proxyOption.value}=${value}`],
+                        `${tomlKeyOf(proxyOption.value)} -> ${value}`);
                 }
                 break;
             }
@@ -216,7 +239,9 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                         : 'main / v1.2.3 / abc123'
                 });
                 if (value) {
-                    await celer.runCommandInTerminal(['configure', `--port=${portName}`, `--${portOption.value}=${value}`]);
+                    await applyConfig('Failed to configure port',
+                        ['configure', `--port=${portName}`, `--${portOption.value}=${value}`],
+                        `port ${portName} -> ${portOption.label.toLowerCase()} updated`);
                 }
                 break;
             }
@@ -240,12 +265,15 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                     const currentVal = ccacheOption.value === 'ccache-enabled' ? cc.enabled : cc.remote_only;
                     const action = await pickBool(ccacheOption.label, currentVal);
                     if (action) {
-                        await celer.runCommandInTerminal(['configure', `--${ccacheOption.value}=${action}`]);
+                        await applyConfig('Failed to configure ccache',
+                            ['configure', `--${ccacheOption.value}=${action}`],
+                            `${tomlKeyOf(ccacheOption.value)} -> ${action}`);
                     }
                 } else if (ccacheOption.value === 'ccache-dir') {
                     const value = await pickDir();
                     if (value) {
-                        await celer.runCommandInTerminal(['configure', `--ccache-dir=${value}`]);
+                        await applyConfig('Failed to configure ccache',
+                            ['configure', `--ccache-dir=${value}`], `${tomlKeyOf('ccache-dir')} -> ${value}`);
                     }
                 } else {
                     const value = await vscode.window.showInputBox({
@@ -254,7 +282,9 @@ export function registerConfigureCommand(context: vscode.ExtensionContext, celer
                             ccacheOption.value === 'ccache-dir' ? '/path/to/ccache' : 'http://host:port/path'
                     });
                     if (value) {
-                        await celer.runCommandInTerminal(['configure', `--${ccacheOption.value}=${value}`]);
+                        await applyConfig('Failed to configure ccache',
+                            ['configure', `--${ccacheOption.value}=${value}`],
+                            `${tomlKeyOf(ccacheOption.value)} -> ${value}`);
                     }
                 }
                 break;

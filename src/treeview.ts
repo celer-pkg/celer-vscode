@@ -95,8 +95,8 @@ export class CelerTreeDataProvider implements vscode.TreeDataProvider<CelerTreeI
         const jobsLabel = jobs ? `${String(jobs).padStart(padWidth, '0')} / ${cpuCount} cores` : 'Not set';
 
         const configSection = new SectionItem('Configuration', [
-            new ConfigItem(`Platform: ${platform}`, 'Select target platform', 'platform', 'chip'),
             new ConfigItem(`Project: ${project}`, 'Select active project', 'project', 'folder'),
+            new ConfigItem(`Platform: ${platform}`, 'Select target platform', 'platform', 'chip'),
             new ConfigItem(`Build Type: ${buildType}`, 'Select build type', 'buildType', 'tools'),
             new ConfigItem(`Jobs: ${jobsLabel}`, 'Set parallel build jobs', 'jobs', 'rocket'),
         ]);

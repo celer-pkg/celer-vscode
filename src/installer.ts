@@ -8,7 +8,7 @@ import * as cp from 'child_process';
  * Handles Celer executable installation and integration
  */
 export class CelerInstaller {
-    constructor(private outputChannel: vscode.OutputChannel) {}
+    constructor(private logChannel: vscode.OutputChannel) {}
 
     async ensureCelerInstalled(autoInstall: boolean = false): Promise<boolean> {
         // Check if celer is already available
@@ -20,7 +20,7 @@ export class CelerInstaller {
         // Check if local celer.exe exists
         const localCelerPath = path.join(workspaceFolder, process.platform === 'win32' ? 'celer.exe' : 'celer');
         if (fs.existsSync(localCelerPath)) {
-            this.outputChannel.appendLine('[INFO] Celer executable found locally');
+            this.logChannel.appendLine('[INFO] Celer executable found locally');
             return true;
         }
 
@@ -28,7 +28,7 @@ export class CelerInstaller {
         try {
             const checkCmd = process.platform === 'win32' ? 'where celer' : 'which celer';
             cp.execSync(checkCmd, { stdio: 'ignore' });
-            this.outputChannel.appendLine('[INFO] Celer found in system PATH');
+            this.logChannel.appendLine('[INFO] Celer found in system PATH');
             return true;
         } catch {
             // Celer not in PATH, continue to download
@@ -78,7 +78,7 @@ export class CelerInstaller {
         } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(`Failed to install Celer: ${errorMsg}`);
-            this.outputChannel.appendLine(`[ERROR] Failed to install Celer: ${errorMsg}`);
+            this.logChannel.appendLine(`[ERROR] Failed to install Celer: ${errorMsg}`);
             return false;
         }
     }
@@ -148,12 +148,12 @@ export class CelerInstaller {
         }
 
         const archivePath = path.join(targetDir, asset.name);
-        this.outputChannel.appendLine(`[INFO] Downloading ${asset.name} from ${asset.browser_download_url}`);
+        this.logChannel.appendLine(`[INFO] Downloading ${asset.name} from ${asset.browser_download_url}`);
 
         await this.downloadFile(asset.browser_download_url, archivePath);
 
         if (extractCmd) {
-            this.outputChannel.appendLine(`[INFO] Extracting ${asset.name}...`);
+            this.logChannel.appendLine(`[INFO] Extracting ${asset.name}...`);
             const cmd = extractCmd.replace('{archive}', archivePath);
             cp.execSync(cmd, { cwd: targetDir, stdio: 'pipe' });
             try { fs.unlinkSync(archivePath); } catch {}
@@ -211,7 +211,7 @@ export class CelerInstaller {
         const integrateCmd = process.platform === 'win32' ? '.\\celer.exe integrate' : './celer integrate';
         terminal.sendText(integrateCmd);
 
-        this.outputChannel.appendLine(`[INFO] Running: ${integrateCmd}`);
+        this.logChannel.appendLine(`[INFO] Running: ${integrateCmd}`);
         
         // Wait for command to complete
         await new Promise(resolve => setTimeout(resolve, 2000));

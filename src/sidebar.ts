@@ -41,15 +41,6 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
         this._view.description = undefined;
     }
 
-    /** Reduce a command failure to a single readable line for a notification. */
-    private describeError(error: unknown): string {
-        const text = error instanceof Error ? error.message : String(error);
-        const lines = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-        // runCommand prefixes failures with "Celer command failed with code N:" — the CLI's
-        // own message is the line after it and is far more useful to show.
-        return lines.find(line => !line.startsWith('Celer command failed')) || lines[0] || 'unknown error';
-    }
-
     private async handleMessage(msg: any): Promise<void> {
         switch (msg.type) {
             case 'select': {
@@ -64,12 +55,22 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                 if (!target) { break; }
 
                 try {
-                    await this.celerManager.runCommand(['configure', `${target.flag}=${value}`]);
-                    vscode.window.setStatusBarMessage(`${tomlKeyOf(target.flag)} -> ${value}`, 4000);
+                    if (id === 'project') {
+                        // Selecting a project may also switch the platform (target_platform).
+                        const result = await this.celerManager.selectProject(value);
+                        const summary = result.platform
+                            ? `${tomlKeyOf('project')} -> ${value} (${tomlKeyOf('platform')} -> ${result.platform})`
+                            : `${tomlKeyOf('project')} -> ${value}`;
+                        vscode.window.setStatusBarMessage(
+                            result.warning ? `${summary} \u2014 see Output for errors` : summary,
+                            result.warning ? 6000 : 4000
+                        );
+                    } else {
+                        await this.celerManager.runCommand(['configure', `${target.flag}=${value}`]);
+                        vscode.window.setStatusBarMessage(`${tomlKeyOf(target.flag)} -> ${value}`, 4000);
+                    }
                 } catch (error) {
-                    vscode.window.showErrorMessage(
-                        `Failed to set ${target.label} to ${value} \u2014 ${this.describeError(error)}`
-                    );
+                    this.celerManager.reportFailure(`Failed to set ${target.label} to ${value}`, error);
                 }
                 // Re-render either way so the combobox reflects what celer.toml actually holds
                 // (a failed switch must revert the value the user picked).
@@ -83,9 +84,7 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                     await this.celerManager.runCommand(['configure', `--${key}=${value}`]);
                     vscode.window.setStatusBarMessage(`${tomlKeyOf(key)} -> ${value}`, 4000);
                 } catch (error) {
-                    vscode.window.showErrorMessage(
-                        `Failed to configure ${tomlKeyOf(key)} \u2014 ${error instanceof Error ? error.message : error}`
-                    );
+                    this.celerManager.reportFailure(`Failed to configure ${tomlKeyOf(key)}`, error);
                 }
                 await this.refresh();
                 break;
@@ -106,7 +105,7 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                 let tomlPaths: string[];
                 if (backend === 'fs') {
                     if (!fsDir) { return; }
-                    args = ['configure', `--pkgcache-fs-dir="${fsDir}"`];
+                    args = ['configure', `--pkgcache-fs-dir=${fsDir}`];
                     tomlPaths = [tomlKeyOf('pkgcache-fs-dir')];
                 } else if (backend === 'minio') {
                     if (!host || !accessKey || !secretKey) { return; }
@@ -128,7 +127,7 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                     await this.celerManager.runCommand(args);
                     vscode.window.setStatusBarMessage(`${tomlPaths.join(', ')} -> updated`, 4000);
                 } catch (error) {
-                    vscode.window.showErrorMessage(`Failed to configure pkgcache \u2014 ${error instanceof Error ? error.message : error}`);
+                    this.celerManager.reportFailure('Failed to configure pkgcache', error);
                 }
                 await this.refresh();
                 break;
@@ -153,17 +152,25 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
                 break;
             }
             case 'setup': {
-                const [host, port] = msg.value.split(':');
-                const cmd = msg.remove
-                    ? `celer configure --proxy-remove=true`
-                    : `celer configure --proxy-host=${host} --proxy-port=${port}`;
-                const terminalName = 'Celer Setup';
-                let terminal = vscode.window.terminals.find(t => t.name === terminalName);
-                if (!terminal) {
-                    terminal = vscode.window.createTerminal(terminalName);
+                // Split on the last ':' so a host like "http://proxy:8080" or an IPv6
+                // literal keeps its own colons and the trailing value is the port.
+                const value = String(msg.value ?? '');
+                const separator = value.lastIndexOf(':');
+                const host = separator >= 0 ? value.slice(0, separator) : value;
+                const port = separator >= 0 ? value.slice(separator + 1) : '';
+                try {
+                    if (msg.remove) {
+                        await this.celerManager.runCommand(['configure', '--proxy-remove=true']);
+                        vscode.window.setStatusBarMessage(`${tomlKeyOf('proxy-host')} -> removed`, 4000);
+                    } else {
+                        await this.celerManager.runCommand([
+                            'configure', `--proxy-host=${host}`, `--proxy-port=${port}`
+                        ]);
+                        vscode.window.setStatusBarMessage(`${tomlKeyOf('proxy-host')} -> ${host}:${port}`, 4000);
+                    }
+                } catch (error) {
+                    this.celerManager.reportFailure('Failed to configure proxy', error);
                 }
-                terminal.show();
-                terminal.sendText(cmd);
                 break;
             }
         }
@@ -201,8 +208,10 @@ export class CelerSidebarProvider implements vscode.WebviewViewProvider {
         });
 
         const combos = [
+            // Project comes first: selecting one applies its target_platform to the
+            // platform below, and the platform can still be overridden afterwards.
+            this.comboboxHtml('project', 'Project:', project, projects),
             this.comboboxHtml('platform', 'Platform:', platform, platforms),
-            this.comboboxHtml('project', 'project:', project, projects),
             this.comboboxHtml('buildType', 'Build type:', buildType, buildTypes),
             this.comboboxHtml('jobs', 'Build jobs:', jobsLabel, jobOptions),
         ].join('\n');

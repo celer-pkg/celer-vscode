@@ -28,7 +28,7 @@ let celerInstaller: CelerInstaller;
 export async function activate(context: vscode.ExtensionContext) {
     // Initialize managers
     celer = new Celer();
-    celerInstaller = new CelerInstaller(celer.getOutputChannel());
+    celerInstaller = new CelerInstaller(celer.getLogChannel());
 
     // Check if this is the first time the extension is activated
     const isFirstRun = context.globalState.get<boolean>('celer.firstRun', true);

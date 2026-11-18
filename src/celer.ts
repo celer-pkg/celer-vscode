@@ -5,6 +5,27 @@ import * as fs from 'fs';
 import { parse as tomlParse } from '@ltd/j-toml';
 import { tomlKeyOf } from './tomlkeys';
 
+/** Strip ANSI SGR escape sequences (colors, bold) from celer output. */
+const ANSI_SGR_PATTERN = /\x1b\[[0-9;]*m/g;
+
+function stripAnsi(text: string): string {
+    return text.replace(ANSI_SGR_PATTERN, '');
+}
+
+/**
+ * celer's own error block, without the extension's transport prefix, ready for the
+ * Output panel. Line breaks and the `[✘]` / `[☛]` / `└─` layout are preserved.
+ */
+function formatCelerError(error: unknown): string {
+    const text = stripAnsi(error instanceof Error ? error.message : String(error));
+    const lines = text.split(/\r?\n/)
+        .filter(line => !line.trimStart().startsWith('Celer command failed'))
+        .map(line => line.trimEnd());
+    while (lines.length > 0 && !lines[0]) { lines.shift(); }
+    while (lines.length > 0 && !lines[lines.length - 1]) { lines.pop(); }
+    return lines.join('\n') || 'unknown error';
+}
+
 export interface CelerConfig {
     platforms?: string[];
     projects?: string[];
@@ -14,22 +35,27 @@ export interface CelerConfig {
     jobs?: number;
 }
 
+/** Outcome of {@link Celer.selectProject}. */
+export interface SelectProjectResult {
+    /** The project's target_platform, when it defines one (applied or already current). */
+    platform?: string;
+    /** A step after the project was applied failed; details are in the Celer output. */
+    warning?: boolean;
+}
+
 export class Celer {
+    /** Command output and failures (the "Celer" output panel). */
     private outputChannel: vscode.OutputChannel;
+    /** Extension diagnostics (the "Celer Logs" output panel). */
+    private logChannel: vscode.OutputChannel;
     private celerPath: string;
     /** Cached short version string, e.g. "v0.0.9". */
     private celerVersion?: string;
 
     constructor() {
         this.outputChannel = vscode.window.createOutputChannel('Celer');
+        this.logChannel = vscode.window.createOutputChannel('Celer Logs');
         this.celerPath = this.getCelerExecutable();
-    }
-
-    /**
-     * Remove ANSI escape codes from string
-     */
-    private stripAnsiCodes(text: string): string {
-        return text.replace(/\x1b\[[0-9;]*m/g, '');
     }
 
     private getCelerExecutable(): string {
@@ -42,7 +68,7 @@ export class Celer {
             if (workspaceFolder) {
                 const localCeler = path.join(workspaceFolder, 'celer.exe');
                 if (fs.existsSync(localCeler)) {
-                    this.outputChannel.appendLine(`[INFO] Using local celer.exe: ${localCeler}`);
+                    this.logChannel.appendLine(`[INFO] Using local celer.exe: ${localCeler}`);
                     return localCeler;
                 }
             }
@@ -58,8 +84,21 @@ export class Celer {
         this.outputChannel.show();
     }
 
-    public getOutputChannel(): vscode.OutputChannel {
-        return this.outputChannel;
+    public getLogChannel(): vscode.OutputChannel {
+        return this.logChannel;
+    }
+
+    /**
+     * Report a failed command in the Output panel, keeping celer's own multi-line
+     * layout ([✘] / [☛] / └─), and reveal the panel. Failures are not shown as
+     * dialog boxes; successful operations are reported on the status bar instead.
+     */
+    public reportFailure(context: string, error: unknown): void {
+        // Each failure should be readable on its own; don't stack old output.
+        this.outputChannel.clear();
+        this.outputChannel.appendLine(context);
+        this.outputChannel.appendLine(formatCelerError(error));
+        this.outputChannel.show(true);
     }
 
     /** Check if celer executable can be found */
@@ -100,7 +139,7 @@ export class Celer {
         if (this.celerVersion) { return this.celerVersion; }
         // Check availability first: runCommand() would pop an install dialog otherwise.
         if (!this.isAvailable()) {
-            this.outputChannel.appendLine('[WARN] getCelerVersion: celer executable not found, version will not be shown');
+            this.logChannel.appendLine('[WARN] getCelerVersion: celer executable not found, version will not be shown');
             return undefined;
         }
 
@@ -113,14 +152,14 @@ export class Celer {
                 const match = banner.match(/\bv(\d+(?:\.\d+)*(?:[-+][0-9A-Za-z.-]+)?)/i);
                 raw = match ? `v${match[1]}` : banner.split(/\r?\n/).map(line => line.trim()).find(Boolean);
             } catch (error) {
-                this.outputChannel.appendLine(`[WARN] getCelerVersion failed: ${error instanceof Error ? error.message : error}`);
+                this.logChannel.appendLine(`[WARN] getCelerVersion failed: ${error instanceof Error ? error.message : error}`);
                 return undefined;
             }
         }
 
         const version = (raw || '').split(/\r?\n/).map(line => line.trim()).find(Boolean);
         if (!version) {
-            this.outputChannel.appendLine('[WARN] getCelerVersion: could not parse the version output');
+            this.logChannel.appendLine('[WARN] getCelerVersion: could not parse the version output');
             return undefined;
         }
         this.celerVersion = /^\d/.test(version) ? `v${version}` : version;
@@ -166,7 +205,7 @@ export class Celer {
         const command = `${cmdExecutable} ${args.join(' ')}`;
         
         // Log to output channel as well
-        this.outputChannel.appendLine(`Running in terminal: ${command}`);
+        this.logChannel.appendLine(`Running in terminal: ${command}`);
         
         // Send command to terminal
         terminal.sendText(command);
@@ -188,12 +227,11 @@ export class Celer {
             }
 
             const command = `"${this.celerPath}" ${args.join(' ')}`;
-            this.outputChannel.appendLine(`Running: ${command}`);
-            
-            const process = cp.spawn(command, { 
-                cwd,
-                shell: true 
-            });
+            this.logChannel.appendLine(`Running: ${command}`);
+
+            // Pass arguments as an array (no shell): workspace-derived values must
+            // never be interpreted as shell syntax or split on spaces.
+            const process = cp.spawn(this.celerPath, args, { cwd });
 
             let stdout = '';
             let stderr = '';
@@ -205,18 +243,21 @@ export class Celer {
             });
 
             process.stderr?.on('data', (data) => {
+                // stderr is celer's error channel. Keep it for the rejection message and
+                // log it for diagnostics; reportFailure() prints the clean block once.
                 const output = data.toString();
                 stderr += output;
-                this.outputChannel.append(output);
+                this.logChannel.append(stripAnsi(output));
             });
 
             process.on('close', (code) => {
                 if (code === 0) {
                     resolve(stdout);
                 } else {
-                    // Strip ANSI codes from error message for dialog display
-                    const cleanStderr = this.stripAnsiCodes(stderr);
-                    reject(new Error(`Celer command failed with code ${code}:\n${cleanStderr}`));
+                    // Some failures print their diagnostics to stdout and leave stderr
+                    // empty; fall back so the error is not reduced to "unknown error".
+                    const details = stripAnsi(stderr.trim() ? stderr : stdout);
+                    reject(new Error(`Celer command failed with code ${code}:\n${details}`));
                 }
             });
 
@@ -243,36 +284,36 @@ export class Celer {
     async getCelerTomlPath(): Promise<string | undefined> {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         if (!workspaceFolder) {
-            this.outputChannel.appendLine('[DEBUG] getCelerTomlPath: no workspace folder');
+            this.logChannel.appendLine('[DEBUG] getCelerTomlPath: no workspace folder');
             return undefined;
         }
 
         const rootPath = workspaceFolder.uri.fsPath;
-        this.outputChannel.appendLine(`[DEBUG] getCelerTomlPath: workspace root = ${rootPath}`);
+        this.logChannel.appendLine(`[DEBUG] getCelerTomlPath: workspace root = ${rootPath}`);
 
         // Check for celer.toml in workspace root only
         const celerTomlPath = path.join(rootPath, 'celer.toml');
-        this.outputChannel.appendLine(`[DEBUG] getCelerTomlPath: checking ${celerTomlPath}, exists=${fs.existsSync(celerTomlPath)}`);
+        this.logChannel.appendLine(`[DEBUG] getCelerTomlPath: checking ${celerTomlPath}, exists=${fs.existsSync(celerTomlPath)}`);
         if (fs.existsSync(celerTomlPath)) {
             return celerTomlPath;
         }
 
         // Check for Celer.toml (capitalized) in workspace root only
         const celerTomlUpperPath = path.join(rootPath, 'Celer.toml');
-        this.outputChannel.appendLine(`[DEBUG] getCelerTomlPath: checking ${celerTomlUpperPath}, exists=${fs.existsSync(celerTomlUpperPath)}`);
+        this.logChannel.appendLine(`[DEBUG] getCelerTomlPath: checking ${celerTomlUpperPath}, exists=${fs.existsSync(celerTomlUpperPath)}`);
         if (fs.existsSync(celerTomlUpperPath)) {
             return celerTomlUpperPath;
         }
 
         // Fallback: use findFiles (same as hasCelerProject)
-        this.outputChannel.appendLine('[DEBUG] getCelerTomlPath: root check failed, trying findFiles');
+        this.logChannel.appendLine('[DEBUG] getCelerTomlPath: root check failed, trying findFiles');
         const files = await vscode.workspace.findFiles('**/{celer,Celer}.toml', null, 1);
         if (files.length > 0) {
-            this.outputChannel.appendLine(`[DEBUG] getCelerTomlPath: found via findFiles = ${files[0].fsPath}`);
+            this.logChannel.appendLine(`[DEBUG] getCelerTomlPath: found via findFiles = ${files[0].fsPath}`);
             return files[0].fsPath;
         }
 
-        this.outputChannel.appendLine('[DEBUG] getCelerTomlPath: celer.toml not found');
+        this.logChannel.appendLine('[DEBUG] getCelerTomlPath: celer.toml not found');
         return undefined;
     }
 
@@ -299,7 +340,7 @@ export class Celer {
             const parsed = tomlParse(content) as any;
 
             // Log parsed keys for debugging (avoid serializing BigInt values)
-            this.outputChannel.appendLine(`[DEBUG] Parsed celer.toml keys: ${JSON.stringify(Object.keys(parsed))}`);
+            this.logChannel.appendLine(`[DEBUG] Parsed celer.toml keys: ${JSON.stringify(Object.keys(parsed))}`);
 
             // Try multiple possible section names (celer may have changed the TOML structure)
             const section = parsed.main || parsed.global || parsed.workspace || parsed.build || parsed.settings || parsed;
@@ -313,11 +354,11 @@ export class Celer {
                 jobs: section.jobs ? parseInt(section.jobs) : undefined
             };
 
-            this.outputChannel.appendLine(`[DEBUG] Read config: platform=${config.currentPlatform}, project=${config.currentProject}, buildType=${config.currentBuildType}, jobs=${config.jobs}`);
+            this.logChannel.appendLine(`[DEBUG] Read config: platform=${config.currentPlatform}, project=${config.currentProject}, buildType=${config.currentBuildType}, jobs=${config.jobs}`);
 
             return config;
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to parse celer.toml: ${error}`);
+            this.logChannel.appendLine(`[ERROR] Failed to parse celer.toml: ${error}`);
             return {};
         }
     }
@@ -326,19 +367,19 @@ export class Celer {
         try {
             // Use celer configure command and wait for completion
             if (config.currentPlatform !== undefined) {
-                this.outputChannel.appendLine(`[INFO] Setting platform to: ${config.currentPlatform}`);
+                this.logChannel.appendLine(`[INFO] Setting platform to: ${config.currentPlatform}`);
                 await this.runCommand(['configure', `--platform=${config.currentPlatform}`]);
                 vscode.window.setStatusBarMessage(`${tomlKeyOf('platform')} -> ${config.currentPlatform}`, 4000);
             }
 
             if (config.currentProject !== undefined) {
-                this.outputChannel.appendLine(`[INFO] Setting project to: ${config.currentProject}`);
+                this.logChannel.appendLine(`[INFO] Setting project to: ${config.currentProject}`);
                 await this.runCommand(['configure', `--project=${config.currentProject}`]);
                 vscode.window.setStatusBarMessage(`${tomlKeyOf('project')} -> ${config.currentProject}`, 4000);
             }
 
             if (config.currentBuildType !== undefined) {
-                this.outputChannel.appendLine(`[INFO] Setting build type to: ${config.currentBuildType}`);
+                this.logChannel.appendLine(`[INFO] Setting build type to: ${config.currentBuildType}`);
                 await this.runCommand(['configure', `--build-type=${config.currentBuildType}`]);
                 vscode.window.setStatusBarMessage(`${tomlKeyOf('build-type')} -> ${config.currentBuildType}`, 4000);
             }
@@ -346,9 +387,7 @@ export class Celer {
             // Wait a bit for file system to sync
             await new Promise(resolve => setTimeout(resolve, 300));
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to configure: ${error}`);
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            vscode.window.showErrorMessage(`Failed to configure Celer: ${errorMessage}`);
+            this.reportFailure('Failed to configure Celer', error);
             throw error;
         }
     }
@@ -361,7 +400,7 @@ export class Celer {
 
         const confPlatformsPath = path.join(workspaceFolder.uri.fsPath, 'conf', 'platforms');
         if (!fs.existsSync(confPlatformsPath)) {
-            this.outputChannel.appendLine(`[INFO] conf/platforms directory not found: ${confPlatformsPath}`);
+            this.logChannel.appendLine(`[INFO] conf/platforms directory not found: ${confPlatformsPath}`);
             return [];
         }
 
@@ -371,12 +410,92 @@ export class Celer {
                 .filter(file => file.endsWith('.toml'))
                 .map(file => file.replace('.toml', ''));
             
-            this.outputChannel.appendLine(`[INFO] Found ${tomlFiles.length} platforms: ${tomlFiles.join(', ')}`);
+            this.logChannel.appendLine(`[INFO] Found ${tomlFiles.length} platforms: ${tomlFiles.join(', ')}`);
             return tomlFiles;
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to read platforms: ${error}`);
+            this.logChannel.appendLine(`[ERROR] Failed to read platforms: ${error}`);
             return [];
         }
+    }
+
+    /** Read a project's `target_platform` from conf/projects/<name>.toml */
+    private async getProjectTargetPlatform(projectName: string): Promise<string | undefined> {
+        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+        if (!workspaceFolder) { return undefined; }
+        // Project names come from a directory listing; refuse anything that could
+        // escape conf/projects when this method is called with external arguments.
+        if (!projectName || path.basename(projectName) !== projectName) { return undefined; }
+
+        const projectPath = path.join(workspaceFolder.uri.fsPath, 'conf', 'projects', `${projectName}.toml`);
+        try {
+            const parsed = tomlParse(await fs.promises.readFile(projectPath, 'utf-8')) as any;
+            const target = parsed?.target_platform;
+            return typeof target === 'string' && target.trim() ? target.trim() : undefined;
+        } catch (error) {
+            this.logChannel.appendLine(
+                `[WARN] Failed to read target_platform of project '${projectName}': ${error}`
+            );
+            return undefined;
+        }
+    }
+
+    /**
+     * Select a project. Recent celer builds apply the project's `target_platform`
+     * as the current platform while running `configure --project`; older builds
+     * ignore it, so apply the platform explicitly when it did not take effect.
+     *
+     * celer saves `main.project` (and the target platform) before later steps such
+     * as pinning the ports repo, so a non-zero exit does not always mean the project
+     * was not applied. A failure after that point is reported as a warning instead
+     * of an error; only a selection that did not land in celer.toml throws.
+     */
+    async selectProject(projectName: string): Promise<SelectProjectResult> {
+        let projectError: unknown;
+        let warning = false;
+
+        try {
+            await this.runCommand(['configure', `--project=${projectName}`]);
+        } catch (error) {
+            projectError = error;
+        }
+
+        const [targetPlatform, config] = await Promise.all([
+            this.getProjectTargetPlatform(projectName),
+            this.readCelerConfig(),
+        ]);
+
+        if (projectError !== undefined) {
+            // celer may have saved main.project before failing on a later step (e.g.
+            // pinning the ports repo), so a non-zero exit alone is not conclusive.
+            // Pre-spawn errors (no executable/workspace) still mean nothing ran.
+            const celerRan = projectError instanceof Error
+                && projectError.message.startsWith('Celer command failed');
+            if (!celerRan || config.currentProject !== projectName) { throw projectError; }
+            warning = true;
+            this.reportFailure(`Project '${projectName}' was selected, but a later step failed`, projectError);
+        }
+
+        if (!targetPlatform) { return { warning }; }
+        if (config.currentPlatform === targetPlatform) { return { platform: targetPlatform, warning }; }
+
+        this.logChannel.appendLine(
+            `[INFO] Project '${projectName}' did not apply its target_platform, configuring it explicitly: ${targetPlatform}`
+        );
+        try {
+            await this.runCommand(['configure', `--platform=${targetPlatform}`]);
+        } catch (error) {
+            // The platform may have been saved even though the command exited
+            // non-zero; only report it when celer.toml really did not take it.
+            const after = await this.readCelerConfig();
+            if (after.currentPlatform === targetPlatform) { return { platform: targetPlatform, warning }; }
+            warning = true;
+            this.reportFailure(
+                `Project '${projectName}' was selected, but target_platform '${targetPlatform}' could not be applied`,
+                error
+            );
+            return { warning };
+        }
+        return { platform: targetPlatform, warning };
     }
 
     async getAvailableProjects(): Promise<string[]> {
@@ -387,7 +506,7 @@ export class Celer {
 
         const confProjectsPath = path.join(workspaceFolder.uri.fsPath, 'conf', 'projects');
         if (!fs.existsSync(confProjectsPath)) {
-            this.outputChannel.appendLine(`[INFO] conf/projects directory not found: ${confProjectsPath}`);
+            this.logChannel.appendLine(`[INFO] conf/projects directory not found: ${confProjectsPath}`);
             return [];
         }
 
@@ -397,10 +516,10 @@ export class Celer {
                 .filter(file => file.endsWith('.toml'))
                 .map(file => file.replace('.toml', ''));
             
-            this.outputChannel.appendLine(`[INFO] Found ${tomlFiles.length} projects: ${tomlFiles.join(', ')}`);
+            this.logChannel.appendLine(`[INFO] Found ${tomlFiles.length} projects: ${tomlFiles.join(', ')}`);
             return tomlFiles;
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to read projects: ${error}`);
+            this.logChannel.appendLine(`[ERROR] Failed to read projects: ${error}`);
             return [];
         }
     }
@@ -433,7 +552,7 @@ export class Celer {
                 return urlMatch[1].trim();
             }
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to read git config: ${error}`);
+            this.logChannel.appendLine(`[ERROR] Failed to read git config: ${error}`);
         }
 
         return undefined;
@@ -463,7 +582,7 @@ export class Celer {
                 return branchMatch[1].trim();
             }
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to read git HEAD: ${error}`);
+            this.logChannel.appendLine(`[ERROR] Failed to read git HEAD: ${error}`);
         }
 
         return undefined;
@@ -510,7 +629,7 @@ export class Celer {
                     resolve(false);
                 });
             } catch (error) {
-                this.outputChannel.appendLine(`[ERROR] Failed to check git status: ${error}`);
+                this.logChannel.appendLine(`[ERROR] Failed to check git status: ${error}`);
                 resolve(false);
             }
         });
@@ -532,18 +651,18 @@ export class Celer {
             try {
                 const packages = this.scanPackagesDir(packagesPath, platform, buildType, project);
                 if (packages.length > 0) {
-                    this.outputChannel.appendLine(`[INFO] Found ${packages.length} installed packages in packages/ (filtered by platform/build_type/project)`);
+                    this.logChannel.appendLine(`[INFO] Found ${packages.length} installed packages in packages/ (filtered by platform/build_type/project)`);
                     return packages;
                 }
             } catch (error) {
-                this.outputChannel.appendLine(`[ERROR] Failed to read packages/: ${error}`);
+                this.logChannel.appendLine(`[ERROR] Failed to read packages/: ${error}`);
             }
         }
 
         // ── Fallback: buildtrees/ directory ──
         const buildtreesPath = path.join(workspaceFolder.uri.fsPath, 'buildtrees');
         if (!fs.existsSync(buildtreesPath)) {
-            this.outputChannel.appendLine(`[INFO] Neither packages/ nor buildtrees/ directory found`);
+            this.logChannel.appendLine(`[INFO] Neither packages/ nor buildtrees/ directory found`);
             return [];
         }
 
@@ -554,10 +673,10 @@ export class Celer {
                 .map(dirent => dirent.name)
                 .sort();
 
-            this.outputChannel.appendLine(`[INFO] Found ${packages.length} installed packages in buildtrees`);
+            this.logChannel.appendLine(`[INFO] Found ${packages.length} installed packages in buildtrees`);
             return packages;
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to read buildtrees: ${error}`);
+            this.logChannel.appendLine(`[ERROR] Failed to read buildtrees: ${error}`);
             return [];
         }
     }
@@ -628,22 +747,22 @@ export class Celer {
     async getAvailablePorts(): Promise<string[]> {
         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
         if (!workspaceFolder) {
-            this.outputChannel.appendLine(`[ERROR] No workspace folder found`);
+            this.logChannel.appendLine(`[ERROR] No workspace folder found`);
             return [];
         }
 
         const portsPath = path.join(workspaceFolder.uri.fsPath, 'ports');
-        this.outputChannel.appendLine(`[INFO] Looking for ports in: ${portsPath}`);
+        this.logChannel.appendLine(`[INFO] Looking for ports in: ${portsPath}`);
 
         if (!fs.existsSync(portsPath)) {
-            this.outputChannel.appendLine(`[WARN] ports directory not found: ${portsPath}`);
+            this.logChannel.appendLine(`[WARN] ports directory not found: ${portsPath}`);
             return [];
         }
 
         try {
             const ports: string[] = [];
             const topLevelDirs = fs.readdirSync(portsPath, { withFileTypes: true });
-            this.outputChannel.appendLine(`[INFO] Found ${topLevelDirs.length} items in ports directory`);
+            this.logChannel.appendLine(`[INFO] Found ${topLevelDirs.length} items in ports directory`);
 
             for (const topDir of topLevelDirs) {
                 if (!topDir.isDirectory() || topDir.name.startsWith('.')) { continue; }
@@ -677,10 +796,10 @@ export class Celer {
             }
 
             ports.sort();
-            this.outputChannel.appendLine(`[INFO] Total available ports: ${ports.length}`);
+            this.logChannel.appendLine(`[INFO] Total available ports: ${ports.length}`);
             return ports;
         } catch (error) {
-            this.outputChannel.appendLine(`[ERROR] Failed to read ports directory: ${error}`);
+            this.logChannel.appendLine(`[ERROR] Failed to read ports directory: ${error}`);
             return [];
         }
     }
